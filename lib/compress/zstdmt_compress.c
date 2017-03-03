@@ -33,7 +33,7 @@
 #  include <stdio.h>
 #  include <unistd.h>
 #  include <sys/times.h>
-   static unsigned g_debugLevel = 3;
+   static unsigned g_debugLevel = 2;
 #  define DEBUGLOGRAW(l, ...) if (l<=g_debugLevel) { fprintf(stderr, __VA_ARGS__); }
 #  define DEBUGLOG(l, ...) if (l<=g_debugLevel) { fprintf(stderr, __FILE__ ": "); fprintf(stderr, __VA_ARGS__); fprintf(stderr, " \n"); }
 
@@ -168,7 +168,7 @@ static ZSTDMT_CCtxPool* ZSTDMT_createCCtxPool(unsigned nbThreads)
     ZSTDMT_CCtxPool* const cctxPool = (ZSTDMT_CCtxPool*) calloc(1, sizeof(ZSTDMT_CCtxPool) + (nbThreads-1)*sizeof(ZSTD_CCtx*));
     if (!cctxPool) return NULL;
     cctxPool->totalCCtx = nbThreads;
-    cctxPool->availCCtx = 1;   /* at least one cctx for single-thread mode */
+    cctxPool->availCCtx = 1;   /* needs at least one cctx for single-thread mode */
     cctxPool->cctx[0] = ZSTD_createCCtx();
     if (!cctxPool->cctx[0]) { ZSTDMT_freeCCtxPool(cctxPool); return NULL; }
     DEBUGLOG(1, "cctxPool created, with %u threads", nbThreads);
@@ -236,6 +236,7 @@ void ZSTDMT_compressChunk(void* jobDescription)
     } else {  /* srcStart points at reloaded section */
         size_t const dictModeError = ZSTD_setCCtxParameter(job->cctx, ZSTD_p_forceRawDict, 1);  /* Force loading dictionary in "content-only" mode (no header analysis) */
         size_t const initError = ZSTD_compressBegin_advanced(job->cctx, job->srcStart, job->dictSize, job->params, 0);
+        DEBUGLOG(5, "checksumFlag : %u ", job->params.fParams.checksumFlag);
         if (ZSTD_isError(initError) || ZSTD_isError(dictModeError)) { job->cSize = initError; goto _endJob; }
         ZSTD_setCCtxParameter(job->cctx, ZSTD_p_forceWindow, 1);
     }
@@ -403,6 +404,7 @@ size_t ZSTDMT_compressCCtx(ZSTDMT_CCtx* mtctx,
 
     if (nbChunks==1) {   /* fallback to single-thread mode */
         ZSTD_CCtx* const cctx = mtctx->cctxPool->cctx[0];
+        DEBUGLOG(5, "cctx address : %08X", (U32)(size_t)cctx);
         return ZSTD_compressCCtx(cctx, dst, dstCapacity, src, srcSize, compressionLevel);
     }
 
