@@ -504,6 +504,7 @@ ZSTDLIB_API size_t ZSTD_compress_advanced (ZSTD_CCtx* ctx,
                                            ZSTD_parameters params);
 
 typedef enum {
+    /* compression parameters */
     ZSTD_p_compressionLevel, /* Update all compression parameters according to pre-defined cLevel table (default:1) */
     ZSTD_p_windowLog,        /* Maximum allowed back-reference distance, expressed as power of 2.
                               * Must be clamped between ZSTD_WINDOWLOG_MIN and ZSTD_WINDOWLOG_MAX
@@ -529,19 +530,24 @@ typedef enum {
                               * resulting in stronger and slower compression */
     ZSTD_p_windowSize,       /* Maximum allowed back-reference distance. Can be set more precisely than windowLog.
                               * Will be automatically reduced to closest <= value (see Zstandard compression format) */
-    ZSTD_p_forceWindow,      /* Force back-references to remain < windowSize, even when referencing into Dictionary content (default:0) */
-    ZSTD_p_forceRawDict,     /* Force loading dictionary in "content-only" mode (no header analysis) (default:0) */
+    /* frame parameters */
+    ZSTD_p_contentSizeFlag,  /* Content size will be written in frame header when known (default:1) */
+    ZSTD_p_contentChecksumFlag, /* A 32-bits content checksum will be calculated and written at end of frame (default:0) */
+    ZSTD_p_dictIDFlag,       /* The dictID of used dictionary will be provided in frame header (default:1) */
 #if 0
-// For Multi-threading Capability (not ready yet !)
+    /* multi-threading parameters (not ready yet !) */
     ZSTD_p_nbThreads,        /* Select how many threads a compression job can spawn (default:1)
                               * More threads improve speed, but also memory usage */
     ZSTDMT_p_jobSize,        /* Size of a compression job. Each job is compressed in parallel.
                               * 0 means default, which is dynamically determined depending on compression parameters.
                               * Job size must be a minimum of overlapSize, or 1 KB, whichever is largest
                               * The minimum size is automatically enforced */
-    ZSTDMT_p_overlapSizeLog  /* Size of previous job input reloaded at the beginning of each job.
+    ZSTDMT_p_overlapSizeLog, /* Size of previous job input reloaded at the beginning of each job.
                               * 0 => no overlap, 6(default) => use 1/8th of windowSize, >=9 => use full windowSize */
 #endif
+    /* advanced parameters */
+    ZSTD_p_forceWindow,      /* Force back-references to remain < windowSize, even when referencing into Dictionary content (default:0) */
+    ZSTD_p_forceRawDict,     /* Force loading dictionary in "content-only" mode (no header analysis) (default:0) */
 } ZSTD_CCtxParameter;
 
 /*! ZSTD_setCCtxParameter() :
@@ -563,6 +569,7 @@ ZSTDLIB_API size_t ZSTD_setLongCCtxParameter(ZSTD_CCtx* cctx, ZSTD_LongCCtxParam
 
 /* Note : we have only one long parameter for now, and none other planned in the near future.
  *        Is it good to keep it generic ? Or should the prototype concentrate on the only use case of interest ? */
+/* Note 2 : this parameter is only useful for the streaming variant ! */
 
 /*! ZSTD_addCCtxDictionary() :
  *  Add a dictionary to be used for next compression with cctx.
@@ -575,7 +582,7 @@ ZSTDLIB_API size_t ZSTD_addCCtxDictionary(ZSTD_CCtx* cctx, const void* dict, siz
 
 
 /*! ZSTD_addCCtxCDict() :
- *  Add a digested dictionary to be used for next compression with cctx.
+ *  Add a prepared dictionary to be used for next compression with cctx.
  *  The added dictionary will remain valid for all future jobs completed with cctx.
  *  @result : 0, or an error code (which can be tested with ZSTD_isError()).
  *  Note 1 : only one dictionary can be managed by cctx currently. So any new dictionary effectively "erase" the previous one.
@@ -612,7 +619,8 @@ ZSTDLIB_API size_t ZSTD_compressStream_generic (ZSTD_CStream* cctx,
                                           void* dst, size_t dstCapacity, size_t* dstPos
                                           const void* src, size_t srcSize, size_t* srcPos,
                                           ZSTD_EndDirective endOp);
-
+/* or keep ZSTD_compress_generic() for the streaming variant ? */
+/* and make CStream converge to become a CCtx too ? */
 #endif
 
 
