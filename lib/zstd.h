@@ -89,14 +89,14 @@ ZSTDLIB_API size_t ZSTD_decompress( void* dst, size_t dstCapacity,
                               const void* src, size_t compressedSize);
 
 /*! ZSTD_getDecompressedSize() :
-*   NOTE: This function is planned to be obsolete, in favour of ZSTD_getFrameContentSize.
-*   ZSTD_getFrameContentSize functions the same way, returning the decompressed size of a single
-*   frame, but distinguishes empty frames from frames with an unknown size, or errors.
+*   NOTE: This function is planned to be obsolete, in favour of ZSTD_getFrameContentSize().
+*   ZSTD_getFrameContentSize() works the same way, returning the decompressed size of a single frame,
+*   but distinguishes empty frames from frames with an unknown size, or errors.
 *
-*   Additionally, ZSTD_findDecompressedSize can be used instead.  It can handle multiple
-*   concatenated frames in one buffer, and so is more general.
-*   As a result however, it requires more computation and entire frames to be passed to it,
-*   as opposed to ZSTD_getFrameContentSize which requires only a single frame's header.
+*   Another variant, ZSTD_findDecompressedSize(), could also be used instead.
+*   It can handle multiple frames concatenated within one buffer.
+*   However, complete frames must be passed to it,
+*   while ZSTD_getFrameContentSize() only requires frame's header.
 *
 *   'src' is the start of a zstd compressed frame.
 *   @return : content size to be decompressed, as a 64-bits value _if known_, 0 otherwise.
@@ -173,14 +173,14 @@ ZSTDLIB_API size_t ZSTD_decompress_usingDict(ZSTD_DCtx* dctx,
                                        const void* dict,size_t dictSize);
 
 
-/****************************
-*  Fast dictionary API
-****************************/
+/*********************************
+*  Bulk processing dictionary API
+**********************************/
 typedef struct ZSTD_CDict_s ZSTD_CDict;
 
 /*! ZSTD_createCDict() :
 *   When compressing multiple messages / blocks with the same dictionary, it's recommended to load it just once.
-*   ZSTD_createCDict() will create a digested dictionary, ready to start future compression operations without startup delay.
+*   ZSTD_createCDict() will create a prepared dictionary, ready to start future compression operations without startup delay.
 *   ZSTD_CDict can be created once and used by multiple threads concurrently, as its usage is read-only.
 *   `dictBuffer` can be released after ZSTD_CDict creation, as its content is copied within CDict */
 ZSTDLIB_API ZSTD_CDict* ZSTD_createCDict(const void* dictBuffer, size_t dictSize, int compressionLevel);
@@ -190,7 +190,7 @@ ZSTDLIB_API ZSTD_CDict* ZSTD_createCDict(const void* dictBuffer, size_t dictSize
 ZSTDLIB_API size_t      ZSTD_freeCDict(ZSTD_CDict* CDict);
 
 /*! ZSTD_compress_usingCDict() :
-*   Compression using a digested Dictionary.
+*   Compression using a prepared Dictionary.
 *   Faster startup than ZSTD_compress_usingDict(), recommended when same dictionary is used multiple times.
 *   Note that compression level is decided during dictionary creation. */
 ZSTDLIB_API size_t ZSTD_compress_usingCDict(ZSTD_CCtx* cctx,
@@ -202,7 +202,7 @@ ZSTDLIB_API size_t ZSTD_compress_usingCDict(ZSTD_CCtx* cctx,
 typedef struct ZSTD_DDict_s ZSTD_DDict;
 
 /*! ZSTD_createDDict() :
-*   Create a digested dictionary, ready to start decompression operation without startup delay.
+*   Create a prepared dictionary, ready to start decompression operation without startup delay.
 *   dictBuffer can be released after DDict creation, as its content is copied inside DDict */
 ZSTDLIB_API ZSTD_DDict* ZSTD_createDDict(const void* dictBuffer, size_t dictSize);
 
@@ -211,7 +211,7 @@ ZSTDLIB_API ZSTD_DDict* ZSTD_createDDict(const void* dictBuffer, size_t dictSize
 ZSTDLIB_API size_t      ZSTD_freeDDict(ZSTD_DDict* ddict);
 
 /*! ZSTD_decompress_usingDDict() :
-*   Decompression using a digested Dictionary.
+*   Decompression using a prepared Dictionary.
 *   Faster startup than ZSTD_decompress_usingDict(), recommended when same dictionary is used multiple times. */
 ZSTDLIB_API size_t ZSTD_decompress_usingDDict(ZSTD_DCtx* dctx,
                                               void* dst, size_t dstCapacity,
@@ -337,11 +337,8 @@ ZSTDLIB_API size_t ZSTD_DStreamOutSize(void);   /*!< recommended size for output
  * ***************************************************************************************/
 
 /* --- Constants ---*/
-#define ZSTD_MAGICNUMBER            0xFD2FB528   /* >= v0.8.0 */
+#define ZSTD_MAGICNUMBER            0xFD2FB528U  /* >= v0.8.0 */
 #define ZSTD_MAGIC_SKIPPABLE_START  0x184D2A50U
-
-#define ZSTD_CONTENTSIZE_UNKNOWN (0ULL - 1)
-#define ZSTD_CONTENTSIZE_ERROR   (0ULL - 2)
 
 #define ZSTD_WINDOWLOG_MAX_32  27
 #define ZSTD_WINDOWLOG_MAX_64  27
@@ -367,7 +364,7 @@ static const size_t ZSTD_frameHeaderSize_max = ZSTD_FRAMEHEADERSIZE_MAX;
 static const size_t ZSTD_skippableHeaderSize = 8;  /* magic number + skippable frame length */
 
 
-/*--- Advanced types ---*/
+/*---  Advanced types  ---*/
 typedef enum { ZSTD_fast, ZSTD_dfast, ZSTD_greedy, ZSTD_lazy, ZSTD_lazy2, ZSTD_btlazy2, ZSTD_btopt, ZSTD_btopt2 } ZSTD_strategy;   /* from faster to stronger */
 
 typedef struct {
@@ -391,32 +388,25 @@ typedef struct {
     ZSTD_frameParameters fParams;
 } ZSTD_parameters;
 
-/*= Custom memory allocation functions */
+/*= Custom memory allocation functions =*/
 typedef void* (*ZSTD_allocFunction) (void* opaque, size_t size);
 typedef void  (*ZSTD_freeFunction) (void* opaque, void* address);
 typedef struct { ZSTD_allocFunction customAlloc; ZSTD_freeFunction customFree; void* opaque; } ZSTD_customMem;
 
 /***************************************
-*  Compressed size functions
+*  Size functions
 ***************************************/
 
-/*! ZSTD_findFrameCompressedSize() :
- *  `src` should point to the start of a ZSTD encoded frame or skippable frame
- *  `srcSize` must be at least as large as the frame
- *  @return : the compressed size of the frame pointed to by `src`, suitable to pass to
- *      `ZSTD_decompress` or similar, or an error code if given invalid input. */
-ZSTDLIB_API size_t ZSTD_findFrameCompressedSize(const void* src, size_t srcSize);
+#define ZSTD_CONTENTSIZE_UNKNOWN (0ULL - 1)
+#define ZSTD_CONTENTSIZE_ERROR   (0ULL - 2)
 
-/***************************************
-*  Decompressed size functions
-***************************************/
 /*! ZSTD_getFrameContentSize() :
 *   `src` should point to the start of a ZSTD encoded frame
 *   `srcSize` must be at least as large as the frame header.  A value greater than or equal
 *       to `ZSTD_frameHeaderSize_max` is guaranteed to be large enough in all cases.
-*   @return : decompressed size of the frame pointed to be `src` if known, otherwise
-*             - ZSTD_CONTENTSIZE_UNKNOWN if the size cannot be determined
-*             - ZSTD_CONTENTSIZE_ERROR if an error occurred (e.g. invalid magic number, srcSize too small) */
+*   @return : decompressed size of the frame pointed to be `src` if known, otherwise :
+*           - ZSTD_CONTENTSIZE_UNKNOWN if the size cannot be determined
+*           - ZSTD_CONTENTSIZE_ERROR if an error occurred (e.g. invalid magic number, srcSize too small) */
 ZSTDLIB_API unsigned long long ZSTD_getFrameContentSize(const void *src, size_t srcSize);
 
 /*! ZSTD_findDecompressedSize() :
@@ -443,6 +433,13 @@ ZSTDLIB_API unsigned long long ZSTD_getFrameContentSize(const void *src, size_t 
 *             read each contained frame header.  This is efficient as most of the data is skipped,
 *             however it does mean that all frame data must be present and valid. */
 ZSTDLIB_API unsigned long long ZSTD_findDecompressedSize(const void* src, size_t srcSize);
+
+/*! ZSTD_findFrameCompressedSize() :
+ *  `src` should point to the start of a ZSTD encoded frame or skippable frame
+ *  `srcSize` must be at least as large as the frame
+ *  @return : the compressed size of the frame pointed to by `src`, suitable to pass to
+ *      `ZSTD_decompress` or similar, or an error code if given invalid input. */
+ZSTDLIB_API size_t ZSTD_findFrameCompressedSize(const void* src, size_t srcSize);
 
 
 /***************************************
@@ -555,21 +552,14 @@ typedef enum {
  *  @result : 0, or an error code (which can be tested with ZSTD_isError()) */
 ZSTDLIB_API size_t ZSTD_setCCtxParameter(ZSTD_CCtx* cctx, ZSTD_CCtxParameter param, unsigned value);
 
-
-typedef enum {
-    ZSTD_p_pledgedSrcSize   /* Total size of data that will be provided, in one or multiple rounds, to compress into a single frame.
-                             * This value will be controlled, and result in an error if it's not respected when closing the frame. */
-                            /* Note : this verification is done only with CStream, not CCtx yet ! */
-} ZSTD_LongCCtxParameter;
-
-/*! ZSTD_setLongCCtxParameter() :
- *  Set one advanced parameter, selected by enum ZSTD_LongCCtxParameter.
+/*! ZSTD_setPledgedSrcSize() :
+ *  Total input data size to be compress into a single frame.
+ *  Note : this value is only useful when data is provided in multiple rounds.
+ *         If all data is provided and consumed in a single round, actual srcSize will be used instead.
+ *  This value will be controlled, and result in an error if it's not respected.
+ *  Note 2 : this verification is done only with CStream, not CCtx yet !
  *  @result : 0, or an error code (which can be tested with ZSTD_isError()) */
-ZSTDLIB_API size_t ZSTD_setLongCCtxParameter(ZSTD_CCtx* cctx, ZSTD_LongCCtxParameter param, unsigned long long value);
-
-/* Note : we have only one long parameter for now, and none other planned in the near future.
- *        Is it good to keep it generic ? Or should the prototype concentrate on the only use case of interest ? */
-/* Note 2 : this parameter is only useful for the streaming variant ! */
+ZSTDLIB_API size_t ZSTD_setPledgedSrcSize(ZSTD_CCtx* cctx, unsigned long long pledgedSrcSize);
 
 /*! ZSTD_addCCtxDictionary() :
  *  Add a dictionary to be used for next compression with cctx.
