@@ -574,7 +574,7 @@ ZSTDLIB_API size_t ZSTD_setPledgedSrcSize(ZSTD_CCtx* cctx, unsigned long long pl
  *           Try to not change compression parameters.
  *  Note 4 : Dictionary content will be copied internally, `dict` buffer can be release after usage. */
 ZSTDLIB_API size_t ZSTD_addCCtxDictionary(ZSTD_CCtx* cctx, const void* dict, size_t dictionary);
-å
+
 /*! ZSTD_addCDict() :
  *  Add a prepared dictionary to be used for next compression with cctx.
  *  The added dictionary will remain valid for all future jobs completed with cctx.
