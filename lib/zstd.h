@@ -500,6 +500,26 @@ ZSTDLIB_API size_t ZSTD_compress_advanced (ZSTD_CCtx* ctx,
                                      const void* dict,size_t dictSize,
                                            ZSTD_parameters params);
 
+
+/*===   New experimental advanced parameters API   ===*/
+
+/* notes on API design :
+ *   In below proposal, parameters are pushed one after anothe into an existing CCtx,
+ *   and then applied on following compression jobs.
+ *   When a new compression job starts, it uses existing compression parameters.
+ *   Note : when no parameter is provided, CCtx is considered created with compression level 1.
+ *
+ *   Another approach could be to load parameters into an intermediate _opaque_ object, such as ZSTD_parameters.
+ *   The object would then be loaded into CCtx (like ZSTD_compress_advanced())
+ *   This approach has an advantage regarding CDict, as it would work the same as ZSTD_createCDict_advanced().
+ *   But it's a bit more cumbersome for CCtx, as it requires to manage an additional object (ZSTD_parameters).
+ *
+ *   Below proposal makes it simpler for CCtx, by avoiding intermediate object
+ *   but a bit more complex for CDict, which advanced version now requires 3 steps.
+ *   (basic CDict API remains the same).
+ *   See API details below
+ */
+
 typedef enum {
     /* compression parameters */
     ZSTD_p_compressionLevel=100, /* Update all compression parameters according to pre-defined cLevel table (default:1) */
@@ -535,9 +555,10 @@ typedef enum {
     ZSTD_p_dictIDFlag,       /* When applicable, the dictID of used dictionary will be provided in frame header (default:1) */
 
     /* dictionary parameters */
-    ZSTD_p_referenceDictContent=300, /* Content of dictionary content will be referenced, instead of copied (default:0).
+    ZSTD_p_refDictContent=300, /* Content of dictionary content will be referenced, instead of copied (default:0).
                               * This avoids duplicating dictionary content.
                               * But it also requires that dictionary buffer outlives its user (CCtx or CDict) */
+    ZSTD_p_forceRawDict,     /* Force loading dictionary in "content-only" mode (no header analysis) (default:0) */
 
 #if 0
     /* multi-threading parameters (not ready yet !) */
@@ -553,7 +574,6 @@ typedef enum {
 
     /* advanced parameters - may not remain available after API update */
     ZSTD_p_forceWindow=1100, /* Force back-references to remain < windowSize, even when referencing into Dictionary content (default:0) */
-    ZSTD_p_forceRawDict,     /* Force loading dictionary in "content-only" mode (no header analysis) (default:0) */
 } ZSTD_cParameter;
 
 
@@ -572,10 +592,10 @@ ZSTDLIB_API size_t ZSTD_CCtx_setParameter(ZSTD_CCtx* cctx, ZSTD_cParameter param
  *  Note 3 : this value is reset to 0 (unknown size) at each new compression */
 ZSTDLIB_API size_t ZSTD_CCtx_setPledgedSrcSize(ZSTD_CCtx* cctx, unsigned long long pledgedSrcSize);
 
-/*! ZSTD_CCtx_addDictionary() :
+/*! ZSTD_CCtx_loadDictionary() :
  *  Add a dictionary to be used for next compression with cctx.
- *  Compression parameters must be set before adding dictionary, as they will be used to process it.
- *  The added dictionary will remain valid for any future compression jobs performed using this cctx.
+ *  Loading is a cpu-intensive operation, which depends on previously selected Compression parameters.
+ *  The added dictionary will remain valid for any future compression jobs performed using the same cctx.
  *  @result : 0, or an error code (which can be tested with ZSTD_isError()).
  *  Special : It's possible to add a NULL (or 0-size) dictionary, which means "return to no-dictionary mode".
  *  Note 1 : Currently, only one dictionary can be managed. So adding a new dictionary effectively "discards" any previous one.
@@ -583,35 +603,39 @@ ZSTDLIB_API size_t ZSTD_CCtx_setPledgedSrcSize(ZSTD_CCtx* cctx, unsigned long lo
  *  Note 3 : Loading a dictionary involves building tables, which are dependent on compression parameters.
  *           For this reason, compression parameters cannot be changed anymore after loading a dictionary.
  *           To change compression parameters, it's necessary to first invalidate existing dictionaries, by loading a NULL dictionary.
- *  Note 4 : Dictionary content will be copied internally, `dict` buffer can be release after usage. */
-ZSTDLIB_API size_t ZSTD_CCtx_addDictionary(ZSTD_CCtx* cctx, const void* dict, size_t dictionary);
+ *  Note 4 : Dictionary content will be copied internally, `dict` buffer can be release after usage.
+ *           This behavior can be modified using ZSTD_p_refDictContent parameter. */
+ZSTDLIB_API size_t ZSTD_CCtx_loadDictionary(ZSTD_CCtx* cctx, const void* dict, size_t dictionary);
 
-/*! ZSTD_CCtx_addCDict() :
+
+/*! ZSTD_CDict_createEmpty() :
+ *  Create a CDict object which is still mutable after creation.
+ *  It allows usage of ZSTD_CDict_setParameter() with it.
+ *  Once compression parameters are all selected,
+ *  it's possible to load the target dictionary, using ZSTD_CDict_loadDictionary().
+ *  Dictionary content will be copied internally, except if ZSTD_p_refDictContent is used.
+ *  After loading the dictionary, no more change is possible.
+ *  The only remaining operation is to free CDict object.
+ *  Note : An unfinished CDict behaves the same as a NULL CDict when referenced into a CCtx.
+ */
+ZSTDLIB_API ZSTD_CDict* ZSTD_CDict_createEmpty(void);
+ZSTDLIB_API size_t ZSTD_CDict_setParameter(ZSTD_CDict* cdict, ZSTD_cParameter param, unsigned value);
+ZSTDLIB_API size_t ZSTD_CDict_loadDictionary(ZSTD_CDict* cdict, const void* dict, size_t dictSize);
+
+/*! ZSTD_CCtx_refCDict() :
  *  Add a prepared dictionary to be used for next compression with cctx.
- *  Note that compression parameters are enforced within CDict, and supercede any compression parameter set within CCtx.
- *  The added dictionary will remain valid for any future compression jobs performed using this cctx.
+ *  Note that compression parameters are enforced within CDict, and supercede any compression parameter previously set within CCtx.
+ *  The added dictionary will remain valid for any future compression job performed using the same cctx.
  *  @result : 0, or an error code (which can be tested with ZSTD_isError()).
  *  Special : It's possible to add a NULL CDict, which means "return to no-dictionary mode".
  *  Note 1 : Currently, only one dictionary can be managed. So adding a new dictionary effectively "discards" any previous one.
  *  Note 2 : CDict will be referenced, its lifetime must outlive CCtx.
  */
-ZSTDLIB_API size_t ZSTD_CCtx_addCDict(ZSTD_CCtx* cctx, const ZSTD_CDict* cdict);
-
-
-/*! ZSTD_createCDict_empty() :
- *  Create a special CDict object, which is still mutable after creation.
- *  The goal is to allow usage of ZSTD_CDict_setParameter() on this object.
- *  Once compression parameters are all selected,
- *  it's possible to load the target dictionary, using ZSTD_CDict_loadDict().
- *  After loading the dictionary, no more change is possible.
- *  An unfinished CDict behaves the same as a NULL CDict when being loaded into a CCtx.
- */
-ZSTDLIB_API ZSTD_CDict* ZSTD_createCDict_empty(void);
-ZSTDLIB_API size_t ZSTD_CDict_setParameter(ZSTD_CDict* cdict, ZSTD_cParameter param, unsigned value);
-ZSTDLIB_API size_t ZSTD_CDict_loadDict(ZSTD_CDict* cdict, const void* dict, size_t dictSize);
+ZSTDLIB_API size_t ZSTD_CCtx_refCDict(ZSTD_CCtx* cctx, const ZSTD_CDict* cdict);
 
 
 #if 0
+// New target advanced compression function
 // Not ready yet !!!
 
 typedef enum {
@@ -621,19 +645,20 @@ typedef enum {
 } ZSTD_EndDirective;
 
 /*! ZSTD_compressStream_generic() :
- *  Behave about the same as ZSTD_compressStream. To note :
+ *  Behave about the same as ZSTD_compressStream. To notice :
  *  - Compression parameters are pushed into CCtx before starting compression, using ZSTD_setCCtxParameter()
- *  - *dspPtr and *srcPos will be updated
+ *  - *dstPos must be <= dstCapacity, *srcPos must be <= srcSize
+ *  - *dspPos and *srcPos will be updated. They are guaranteed to remain below their respective limit.
  *  - @return provides the amount of data still present within internal buffers
  *            or an error code, which can be tested using ZSTD_isError().
- *            if @return != 0, flush is not completed, and must be called again to empty internal buffers.
+ *            if @return != 0, flush is not fully completed, so it must be called again to empty internal buffers.
  */
 ZSTDLIB_API size_t ZSTD_compress_generic (ZSTD_CCtx* cctx,
                                           void* dst, size_t dstCapacity, size_t* dstPos
                                           const void* src, size_t srcSize, size_t* srcPos,
                                           ZSTD_EndDirective endOp);
 
-/* requirement : cctx and cstream must become the same type first */
+/* requirement : cctx and cstream must become same type first */
 
 #endif
 
@@ -687,13 +712,13 @@ ZSTDLIB_API unsigned ZSTD_getDictID_fromDDict(const ZSTD_DDict* ddict);
 /*! ZSTD_getDictID_fromFrame() :
  *  Provides the dictID required to decompressed the frame stored within `src`.
  *  If @return == 0, the dictID could not be decoded.
- *  This could for one of the following reasons :
+ *  This could be any of the following reasons :
  *  - The frame does not require a dictionary to be decoded (most common case).
- *  - The frame was built with dictID intentionally removed. Whatever dictionary is necessary is a hidden information.
- *    Note : this use case also happens when using a non-conformant dictionary.
- *  - `srcSize` is too small, and as a result, the frame header could not be decoded (only possible if `srcSize < ZSTD_FRAMEHEADERSIZE_MAX`).
+ *  - The frame was compressed using a non-conformant dictionary, also called "content only"
+ *  - The frame was built with dictID intentionally removed. Dictionary ID is a secret information.
+ *  - `srcSize` is too small, the frame header could not be decoded (only possible if `srcSize < ZSTD_FRAMEHEADERSIZE_MAX`).
  *  - This is not a Zstandard frame.
- *  When identifying the exact failure cause, it's possible to used ZSTD_getFrameParams(), which will provide a more precise error code. */
+ *  To identify the exact failure cause, it's possible to used ZSTD_getFrameParams(), which will provide a more precise error code. */
 ZSTDLIB_API unsigned ZSTD_getDictID_fromFrame(const void* src, size_t srcSize);
 
 
