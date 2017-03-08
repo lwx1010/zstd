@@ -516,7 +516,7 @@ typedef enum {
     ZSTD_p_searchLog,        /* Number of search attempts, as a power of 2.
                               * More attempts result in better and slower compression.
                               * This parameter is useless when using "fast" and "dFast" strategies */
-    ZSTD_p_minMatchLength,   /* Minimum match size (except for repeat-matches, which are hard-coded).
+    ZSTD_p_minMatchLength,   /* Minimum match size (except for repeat-matches, which limit is hard-coded).
                               * Larger values make compression and decompression faster, but decrease compression ratio
                               * Minimum value vary : It's 4 for all strategies < btopt, 3 for >= btopt.
                               * Maximum value vary : It's 7 for strategy dFast, 6 for all others */
@@ -528,13 +528,20 @@ typedef enum {
                               * resulting in stronger and slower compression */
     ZSTD_p_windowSize,       /* Maximum allowed back-reference distance. Can be set more precisely than windowLog.
                               * Will be automatically reduced to closest <= value (see Zstandard compression format) */
+
     /* frame parameters */
     ZSTD_p_contentSizeFlag=200, /* Content size will be written in frame header _when known_ (default:1) */
     ZSTD_p_contentChecksumFlag, /* A 32-bits content checksum will be calculated and written at end of frame (default:0) */
     ZSTD_p_dictIDFlag,       /* When applicable, the dictID of used dictionary will be provided in frame header (default:1) */
+
+    /* dictionary parameters */
+    ZSTD_p_referenceDictContent=300, /* Content of dictionary content will be referenced, instead of copied (default:0).
+                              * This avoids duplicating dictionary content.
+                              * But it also requires that dictionary buffer outlives its user (CCtx or CDict) */
+
 #if 0
     /* multi-threading parameters (not ready yet !) */
-    ZSTD_p_nbThreads=300,    /* Select how many threads a compression job can spawn (default:1)
+    ZSTD_p_nbThreads=400,    /* Select how many threads a compression job can spawn (default:1)
                               * More threads improve speed, but increases also memory usage */
     ZSTDMT_p_jobSize,        /* Size of a compression job. Each job is compressed in parallel.
                               * 0 means default, which is dynamically determined based on compression parameters.
@@ -543,57 +550,74 @@ typedef enum {
     ZSTDMT_p_overlapSizeLog, /* Size of previous input reloaded at the beginning of each job.
                               * 0 => no overlap, 6(default) => use 1/8th of windowSize, >=9 => use full windowSize */
 #endif
+
     /* advanced parameters - may not remain available after API update */
     ZSTD_p_forceWindow=1100, /* Force back-references to remain < windowSize, even when referencing into Dictionary content (default:0) */
     ZSTD_p_forceRawDict,     /* Force loading dictionary in "content-only" mode (no header analysis) (default:0) */
-} ZSTD_CCtxParameter;
+} ZSTD_cParameter;
 
 
-/*! ZSTD_setCCtxParameter() :
+/*! ZSTD_CCtx_setParameter() :
  *  Set one compression parameter, selected by enum ZSTD_CCtxParameter.
  *  @result : 0, or an error code (which can be tested with ZSTD_isError()) */
-ZSTDLIB_API size_t ZSTD_setCCtxParameter(ZSTD_CCtx* cctx, ZSTD_CCtxParameter param, unsigned value);
+ZSTDLIB_API size_t ZSTD_CCtx_setParameter(ZSTD_CCtx* cctx, ZSTD_cParameter param, unsigned value);
 
-/*! ZSTD_setPledgedSrcSize() :
+/*! ZSTD_CCtx_setPledgedSrcSize() :
  *  Total input data size to be compressed into a single frame.
- *  Note : this value is only useful when data is provided in multiple rounds.
- *         If all data is provided and consumed in a single round, actual srcSize will be used instead.
  *  This value will be controlled, and result in an error if it's not respected.
- *  Note 2 : this verification is done only with CStream, not CCtx yet !
- *  Note 3 : this value is reset to 0 (unknown size) at each new compression
- *  @result : 0, or an error code (which can be tested with ZSTD_isError()) */
-ZSTDLIB_API size_t ZSTD_setPledgedSrcSize(ZSTD_CCtx* cctx, unsigned long long pledgedSrcSize);
-
-/*! ZSTD_addCCtxDictionary() :
- *  Add a dictionary to be used for next compression with cctx.
- *  The added dictionary will remain valid for all future jobs completed with cctx.
  *  @result : 0, or an error code (which can be tested with ZSTD_isError()).
- *  Note 1 : Currently, only one dictionary can be managed. So a new dictionary effectively "discards" the previous one.
+ *  Note : this value is only useful when data is provided in multiple rounds.
+ *         If all data is provided and consumed in a single round, srcSize will be used instead.
+ *  Note 2 : this verification is currently done only with CStream, not CCtx yet !
+ *  Note 3 : this value is reset to 0 (unknown size) at each new compression */
+ZSTDLIB_API size_t ZSTD_CCtx_setPledgedSrcSize(ZSTD_CCtx* cctx, unsigned long long pledgedSrcSize);
+
+/*! ZSTD_CCtx_addDictionary() :
+ *  Add a dictionary to be used for next compression with cctx.
+ *  Compression parameters must be set before adding dictionary, as they will be used to process it.
+ *  The added dictionary will remain valid for any future compression jobs performed using this cctx.
+ *  @result : 0, or an error code (which can be tested with ZSTD_isError()).
+ *  Special : It's possible to add a NULL (or 0-size) dictionary, which means "return to no-dictionary mode".
+ *  Note 1 : Currently, only one dictionary can be managed. So adding a new dictionary effectively "discards" any previous one.
  *  Note 2 : Loading a dictionary is a significant effort. Try to share it over several sessions.
  *  Note 3 : Loading a dictionary involves building tables, which are dependent on compression parameters.
- *           Try to not change compression parameters.
+ *           For this reason, compression parameters cannot be changed anymore after loading a dictionary.
+ *           To change compression parameters, it's necessary to first invalidate existing dictionaries, by loading a NULL dictionary.
  *  Note 4 : Dictionary content will be copied internally, `dict` buffer can be release after usage. */
-ZSTDLIB_API size_t ZSTD_addCCtxDictionary(ZSTD_CCtx* cctx, const void* dict, size_t dictionary);
+ZSTDLIB_API size_t ZSTD_CCtx_addDictionary(ZSTD_CCtx* cctx, const void* dict, size_t dictionary);
 
-/*! ZSTD_addCDict() :
+/*! ZSTD_CCtx_addCDict() :
  *  Add a prepared dictionary to be used for next compression with cctx.
- *  The added dictionary will remain valid for all future jobs completed with cctx.
+ *  Note that compression parameters are enforced within CDict, and supercede any compression parameter set within CCtx.
+ *  The added dictionary will remain valid for any future compression jobs performed using this cctx.
  *  @result : 0, or an error code (which can be tested with ZSTD_isError()).
- *  Note 1 : only one dictionary can be managed by cctx currently. So any new dictionary effectively "erase" the previous one.
- *  Note 2 : CDict will be just referenced, so its lifetime must outlive cctx.
- *  Note 3 : Compression parameters were selected at the moment CDict was created.
+ *  Special : It's possible to add a NULL CDict, which means "return to no-dictionary mode".
+ *  Note 1 : Currently, only one dictionary can be managed. So adding a new dictionary effectively "discards" any previous one.
+ *  Note 2 : CDict will be referenced, its lifetime must outlive CCtx.
  */
-ZSTDLIB_API size_t ZSTD_addCDict(ZSTD_CCtx* cctx, const ZSTD_CDict* cdict);
+ZSTDLIB_API size_t ZSTD_CCtx_addCDict(ZSTD_CCtx* cctx, const ZSTD_CDict* cdict);
 
+
+/*! ZSTD_createCDict_empty() :
+ *  Create a special CDict object, which is still mutable after creation.
+ *  The goal is to allow usage of ZSTD_CDict_setParameter() on this object.
+ *  Once compression parameters are all selected,
+ *  it's possible to load the target dictionary, using ZSTD_CDict_loadDict().
+ *  After loading the dictionary, no more change is possible.
+ *  An unfinished CDict behaves the same as a NULL CDict when being loaded into a CCtx.
+ */
+ZSTDLIB_API ZSTD_CDict* ZSTD_createCDict_empty(void);
+ZSTDLIB_API size_t ZSTD_CDict_setParameter(ZSTD_CDict* cdict, ZSTD_cParameter param, unsigned value);
+ZSTDLIB_API size_t ZSTD_CDict_loadDict(ZSTD_CDict* cdict, const void* dict, size_t dictSize);
 
 
 #if 0
 // Not ready yet !!!
 
 typedef enum {
-    ZSTD_e_continue,   /* continue sending data, encoder decides when to output result (depending on optimal conditions) */
-    ZSTD_e_flush,      /* flush any data provided and buffered so far - frame will continue, hence future data can reference previous data for better compression */
-    ZSTD_e_end         /* flush any remaining data and ends current frame */
+    ZSTD_e_continue,   /* continue sending data, encoder decides when to output result, depending on optimal conditions */
+    ZSTD_e_flush,      /* flush any data provided and buffered so far - frame will continue, so future data can reference previous data for better compression */
+    ZSTD_e_end         /* flush any remaining data and ends current frame. Any future compression starts a new frame. */
 } ZSTD_EndDirective;
 
 /*! ZSTD_compressStream_generic() :
