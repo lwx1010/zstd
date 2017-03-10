@@ -504,7 +504,7 @@ ZSTDLIB_API size_t ZSTD_compress_advanced (ZSTD_CCtx* ctx,
 /*===   New experimental advanced parameters API   ===*/
 
 /* notes on API design :
- *   In below proposal, parameters are pushed one after anothe into an existing CCtx,
+ *   In below proposal, parameters are pushed one after another into an existing CCtx,
  *   and then applied on following compression jobs.
  *   When a new compression job starts, it uses existing compression parameters.
  *   Note : when no parameter is provided, CCtx is considered created with compression level 1.
@@ -520,17 +520,28 @@ ZSTDLIB_API size_t ZSTD_compress_advanced (ZSTD_CCtx* ctx,
  *   See API details below
  */
 
+/* notes on naming convention :
+ *   Initially, the API favored naming like ZSTD_setCCtxParameter() .
+ *   In this proposal, this is changed into ZSTD_CCtx_setParameter() .
+ *   The main idea is that it identifies more clearly the target object type.
+ *   It feels clearer when considering the other variants :
+ *   ZSTD_CDict_setParameter() or ZSTD_setCDictParameter() ?
+ *   ZSTD_DCtx_setParameter()  ot ZSTD_setDCtxParameter()  ?
+ *   The first verion looks clearer.
+ */
+
 typedef enum {
     /* compression parameters */
     ZSTD_p_compressionLevel=100, /* Update all compression parameters according to pre-defined cLevel table (default:1) */
     ZSTD_p_windowLog,        /* Maximum allowed back-reference distance, expressed as power of 2.
-                              * Must be clamped between ZSTD_WINDOWLOG_MIN and ZSTD_WINDOWLOG_MAX
+                              * Must be clamped between ZSTD_WINDOWLOG_MIN and ZSTD_WINDOWLOG_MAX.
                               * default value : set through compressionLevel */
     ZSTD_p_hashLog,          /* Size of the probe table, as a power of 2.
                               * Resulting table size is (1 << (hashLog+2)).
+                              * Must be clamped between ZSTD_HASHLOG_MIN and ZSTD_HASHLOG_MAX.
                               * Larger tables improve compression ratio of fast strategies, and improve speed of slow strategies */
     ZSTD_p_chainLog,         /* Size of the full-search table, as a power of 2.
-                              * Resulting table size is (1<< (chainLog+2)).
+                              * Resulting table size is (1 << (chainLog+2)).
                               * Larger tables result in better and slower compression.
                               * This parameter is useless when using "fast" strategy */
     ZSTD_p_searchLog,        /* Number of search attempts, as a power of 2.
@@ -542,12 +553,13 @@ typedef enum {
                               * Maximum value vary : It's 7 for strategy dFast, 6 for all others */
     ZSTD_p_targetLength,     /* Match size which is considered "good enough" to stop search.
                               * Larger values make compression stronger and slower.
-                              * Only useful for strategies <= btopt */
+                              * Only useful for strategies >= btopt */
     ZSTD_p_compressionStrategy, /* See ZSTD_strategy. Cast the selected strategy into unsigned.
                               * The higher the value of selected strategy, the more complex it is,
                               * resulting in stronger and slower compression */
     ZSTD_p_windowSize,       /* Maximum allowed back-reference distance. Can be set more precisely than windowLog.
                               * Will be automatically reduced to closest <= value (see Zstandard compression format) */
+                             /* Not ready yet ! */
 
     /* frame parameters */
     ZSTD_p_contentSizeFlag=200, /* Content size will be written in frame header _when known_ (default:1) */
@@ -576,11 +588,14 @@ typedef enum {
     ZSTD_p_forceWindow=1100, /* Force back-references to remain < windowSize, even when referencing into Dictionary content (default:0) */
 } ZSTD_cParameter;
 
+#define ZSTD_CCtxParameter ZSTD_cParameter   /* temporary adaptation */
 
 /*! ZSTD_CCtx_setParameter() :
  *  Set one compression parameter, selected by enum ZSTD_CCtxParameter.
  *  @result : 0, or an error code (which can be tested with ZSTD_isError()) */
 ZSTDLIB_API size_t ZSTD_CCtx_setParameter(ZSTD_CCtx* cctx, ZSTD_cParameter param, unsigned value);
+
+#define ZSTD_setCCtxParameter ZSTD_CCtx_setParameter   /* temporary adaptation */
 
 /*! ZSTD_CCtx_setPledgedSrcSize() :
  *  Total input data size to be compressed into a single frame.
