@@ -613,9 +613,9 @@ ZSTDLIB_API size_t ZSTD_CCtx_setPledgedSrcSize(ZSTD_CCtx* cctx, unsigned long lo
  *  Loading is a cpu-intensive operation, which depends on previously selected Compression parameters.
  *  The added dictionary will remain valid for any future compression jobs performed using the same cctx.
  *  @result : 0, or an error code (which can be tested with ZSTD_isError()).
- *  Special : It's possible to add a NULL (or 0-size) dictionary, which means "return to no-dictionary mode".
+ *  Special : Adding a NULL (or 0-size) dictionary invalidates all dictionaries, meaning "return to no-dictionary mode".
  *  Note 1 : Currently, only one dictionary can be managed. So adding a new dictionary effectively "discards" any previous one.
- *  Note 2 : Loading a dictionary is a significant effort. Try to share it over several sessions.
+ *  Note 2 : Loading a dictionary is a significant effort. Try to share it over several compression jobs.
  *  Note 3 : Loading a dictionary involves building tables, which are dependent on compression parameters.
  *           For this reason, compression parameters cannot be changed anymore after loading a dictionary.
  *           To change compression parameters, it's necessary to first invalidate existing dictionaries, by loading a NULL dictionary.
@@ -626,8 +626,8 @@ ZSTDLIB_API size_t ZSTD_CCtx_loadDictionary(ZSTD_CCtx* cctx, const void* dict, s
 
 /*! ZSTD_CDict_createEmpty() :
  *  Create a CDict object which is still mutable after creation.
- *  It allows usage of ZSTD_CDict_setParameter() with it.
- *  Once compression parameters are all selected,
+ *  It allows usage of ZSTD_CDict_setParameter().
+ *  Once all compression parameters are selected,
  *  it's possible to load the target dictionary, using ZSTD_CDict_loadDictionary().
  *  Dictionary content will be copied internally, except if ZSTD_p_refDictContent is used.
  *  After loading the dictionary, no more change is possible.
@@ -640,7 +640,7 @@ ZSTDLIB_API size_t ZSTD_CDict_loadDictionary(ZSTD_CDict* cdict, const void* dict
 
 /*! ZSTD_CCtx_refCDict() :
  *  Add a prepared dictionary to be used for next compression with cctx.
- *  Note that compression parameters are enforced within CDict, and supercede any compression parameter previously set within CCtx.
+ *  Note that compression parameters are enforced within CDict, they supercede any compression parameter previously set within CCtx.
  *  The added dictionary will remain valid for any future compression job performed using the same cctx.
  *  @result : 0, or an error code (which can be tested with ZSTD_isError()).
  *  Special : It's possible to add a NULL CDict, which means "return to no-dictionary mode".
