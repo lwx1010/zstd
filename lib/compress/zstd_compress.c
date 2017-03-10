@@ -2447,7 +2447,7 @@ static size_t ZSTD_compress_generic (ZSTD_CCtx* cctx,
         if (remaining < blockSize) blockSize = remaining;
 
         /* preemptive overflow correction */
-        if (cctx->lowLimit > (2U<<30)) {
+        if (cctx->lowLimit > (3U<<29)) {
             U32 const cycleMask = (1 << ZSTD_cycleLog(cctx->params.cParams.hashLog, cctx->params.cParams.strategy)) - 1;
             U32 const current = (U32)(ip - cctx->base);
             U32 const newCurrent = (current & cycleMask) + (1 << cctx->params.cParams.windowLog);
@@ -3175,7 +3175,7 @@ size_t ZSTD_initCStream(ZSTD_CStream* zcs, int compressionLevel)
 size_t ZSTD_sizeof_CStream(const ZSTD_CStream* zcs)
 {
     if (zcs==NULL) return 0;   /* support sizeof on NULL */
-    return sizeof(zcs) + ZSTD_sizeof_CCtx(zcs->cctx) + ZSTD_sizeof_CDict(zcs->cdictLocal) + zcs->outBuffSize + zcs->inBuffSize;
+    return sizeof(*zcs) + ZSTD_sizeof_CCtx(zcs->cctx) + ZSTD_sizeof_CDict(zcs->cdictLocal) + zcs->outBuffSize + zcs->inBuffSize;
 }
 
 /*======   Compression   ======*/
