@@ -570,6 +570,7 @@ typedef enum {
     ZSTD_p_refDictContent=300, /* Content of dictionary content will be referenced, instead of copied (default:0).
                               * This avoids duplicating dictionary content.
                               * But it also requires that dictionary buffer outlives its user (CCtx or CDict) */
+                             /* Not ready yet ! */
     ZSTD_p_forceRawDict,     /* Force loading dictionary in "content-only" mode (no header analysis) (default:0) */
 
 #if 0

@@ -49,6 +49,12 @@ static void ZSTD_resetSeqStore(seqStore_t* ssPtr)
 /*-*************************************
 *  Context memory management
 ***************************************/
+typedef struct ZSTD_parameters_internal_s {
+    int compressionLevel;
+    int enableCParams;
+    ZSTD_compressionParameters cParams;
+} ZSTD_parameters_internal;
+
 struct ZSTD_CCtx_s {
     const BYTE* nextSrc;    /* next block here to continue on current prefix */
     const BYTE* base;       /* All regular indexes relative to this position */
@@ -65,6 +71,7 @@ struct ZSTD_CCtx_s {
     U32   rep[ZSTD_REP_NUM];
     U32   repToConfirm[ZSTD_REP_NUM];
     U32   dictID;
+    ZSTD_parameters_internal requestedParams;
     ZSTD_parameters params;
     void* workSpace;
     size_t workSpaceSize;
@@ -119,10 +126,88 @@ size_t ZSTD_sizeof_CCtx(const ZSTD_CCtx* cctx)
     return sizeof(*cctx) + cctx->workSpaceSize;
 }
 
-size_t ZSTD_setCCtxParameter(ZSTD_CCtx* cctx, ZSTD_CCtxParameter param, unsigned value)
+size_t ZSTD_CCtx_setParameter(ZSTD_CCtx* cctx, ZSTD_cParameter param, unsigned value)
 {
+#   define CLAMPCHECK(val,min,max) { if ((val<min) | (val>max)) return ERROR(compressionParameter_unsupported); }
+#   define LOADCPARAMS(cParams) \
+            if (cctx->requestedParams.enableCParams == 0)  {     \
+                cctx->requestedParams.enableCParams = 1;         \
+                cParams = ZSTD_getCParams( \
+                    cctx->requestedParams.compressionLevel,      \
+                    cctx->frameContentSize, 0);   /* we can't know dictSize at this stage yet */ \
+            }
+
+
     switch(param)
     {
+    case ZSTD_p_compressionLevel :
+            if ((int)value > ZSTD_maxCLevel()) value = ZSTD_maxCLevel();   /* cap max compression level */
+            if (value == 0) return 0;  /* special value : 0 means "don't change anything" */
+            cctx->requestedParams.compressionLevel = (int)value;  /* note : no support for negative values for the time being */
+            cctx->requestedParams.enableCParams = 0;   /* resetting advanced parameters */
+            memset(&cctx->requestedParams.cParams, 0, sizeof(cctx->requestedParams.cParams));
+            return 0;
+
+    case ZSTD_p_windowLog :
+            CLAMPCHECK(value, ZSTD_WINDOWLOG_MIN, ZSTD_WINDOWLOG_MAX);
+            LOADCPARAMS(cctx->requestedParams.cParams);
+            cctx->requestedParams.cParams.windowLog = value;
+            return 0;
+
+    case ZSTD_p_hashLog :
+            CLAMPCHECK(value, ZSTD_HASHLOG_MIN, ZSTD_HASHLOG_MAX);
+            LOADCPARAMS(cctx->requestedParams.cParams);
+            cctx->requestedParams.cParams.hashLog = value;
+            return 0;
+
+    case ZSTD_p_chainLog :
+            CLAMPCHECK(value, ZSTD_CHAINLOG_MIN, ZSTD_CHAINLOG_MAX);
+            LOADCPARAMS(cctx->requestedParams.cParams);
+            cctx->requestedParams.cParams.chainLog = value;
+            return 0;
+
+    case ZSTD_p_searchLog :
+            CLAMPCHECK(value, ZSTD_SEARCHLOG_MIN, ZSTD_SEARCHLOG_MAX);
+            LOADCPARAMS(cctx->requestedParams.cParams);
+            cctx->requestedParams.cParams.searchLog = value;
+            return 0;
+
+    case ZSTD_p_minMatchLength :
+            CLAMPCHECK(value, ZSTD_SEARCHLENGTH_MIN, ZSTD_SEARCHLENGTH_MAX);
+            LOADCPARAMS(cctx->requestedParams.cParams);
+            cctx->requestedParams.cParams.searchLength = value;
+            return 0;
+
+    case ZSTD_p_targetLength :
+            CLAMPCHECK(value, ZSTD_TARGETLENGTH_MIN, ZSTD_TARGETLENGTH_MAX);
+            LOADCPARAMS(cctx->requestedParams.cParams);
+            cctx->requestedParams.cParams.targetLength = value;
+            return 0;
+
+    case ZSTD_p_compressionStrategy :
+            if (value > (unsigned)ZSTD_btopt2) return ERROR(compressionParameter_unsupported);
+            LOADCPARAMS(cctx->requestedParams.cParams);
+            cctx->requestedParams.cParams.strategy = (ZSTD_strategy)value;
+            return 0;
+
+    case ZSTD_p_windowSize :   /* to be done later */
+            return ERROR(compressionParameter_unsupported);
+
+    case ZSTD_p_contentSizeFlag : /* Content size will be written in frame header _when known_ (default:1) */
+            cctx->params.fParams.contentSizeFlag = value>0;
+            return 0;
+
+    case ZSTD_p_contentChecksumFlag : /* A 32-bits content checksum will be calculated and written at end of frame (default:0) */
+            cctx->params.fParams.checksumFlag = value>0;
+            return 0;
+
+    case ZSTD_p_dictIDFlag : /* When applicable, the dictID of used dictionary will be provided in frame header (default:1) */
+            cctx->params.fParams.noDictIDFlag = value==0;
+            return 0;
+
+    case ZSTD_p_refDictContent :   /* to be done later */
+            return ERROR(compressionParameter_unsupported);
+
     case ZSTD_p_forceWindow : cctx->forceWindow = value>0; cctx->loadedDictEnd = 0; return 0;
     case ZSTD_p_forceRawDict : cctx->forceRawDict = value>0; return 0;
     default: return ERROR(parameter_unknown);
@@ -145,7 +230,6 @@ static ZSTD_parameters ZSTD_getParamsFromCCtx(const ZSTD_CCtx* cctx)
     @return : 0, or an error code if one value is beyond authorized range */
 size_t ZSTD_checkCParams(ZSTD_compressionParameters cParams)
 {
-#   define CLAMPCHECK(val,min,max) { if ((val<min) | (val>max)) return ERROR(compressionParameter_unsupported); }
     CLAMPCHECK(cParams.windowLog, ZSTD_WINDOWLOG_MIN, ZSTD_WINDOWLOG_MAX);
     CLAMPCHECK(cParams.chainLog, ZSTD_CHAINLOG_MIN, ZSTD_CHAINLOG_MAX);
     CLAMPCHECK(cParams.hashLog, ZSTD_HASHLOG_MIN, ZSTD_HASHLOG_MAX);
@@ -853,7 +937,14 @@ static unsigned ZSTD_NbCommonBytes (register size_t val)
 #       elif defined(__GNUC__) && (__GNUC__ >= 3)
             return (__builtin_ctzll((U64)val) >> 3);
 #       else
-            static const int DeBruijnBytePos[64] = { 0, 0, 0, 0, 0, 1, 1, 2, 0, 3, 1, 3, 1, 4, 2, 7, 0, 2, 3, 6, 1, 5, 3, 5, 1, 3, 4, 4, 2, 5, 6, 7, 7, 0, 1, 2, 3, 3, 4, 6, 2, 6, 5, 5, 3, 4, 5, 6, 7, 1, 2, 4, 6, 4, 4, 5, 7, 2, 6, 5, 7, 6, 7, 7 };
+            static const int DeBruijnBytePos[64] = { 0, 0, 0, 0, 0, 1, 1, 2,
+                                                     0, 3, 1, 3, 1, 4, 2, 7,
+                                                     0, 2, 3, 6, 1, 5, 3, 5,
+                                                     1, 3, 4, 4, 2, 5, 6, 7,
+                                                     7, 0, 1, 2, 3, 3, 4, 6,
+                                                     2, 6, 5, 5, 3, 4, 5, 6,
+                                                     7, 1, 2, 4, 6, 4, 4, 5,
+                                                     7, 2, 6, 5, 7, 6, 7, 7 };
             return DeBruijnBytePos[((U64)((val & -(long long)val) * 0x0218A392CDABBD3FULL)) >> 58];
 #       endif
         } else { /* 32 bits */
@@ -864,7 +955,10 @@ static unsigned ZSTD_NbCommonBytes (register size_t val)
 #       elif defined(__GNUC__) && (__GNUC__ >= 3)
             return (__builtin_ctz((U32)val) >> 3);
 #       else
-            static const int DeBruijnBytePos[32] = { 0, 0, 3, 0, 3, 1, 3, 0, 3, 2, 2, 1, 3, 2, 0, 1, 3, 3, 1, 2, 2, 2, 2, 0, 3, 1, 2, 0, 1, 0, 1, 1 };
+            static const int DeBruijnBytePos[32] = { 0, 0, 3, 0, 3, 1, 3, 0,
+                                                     3, 2, 2, 1, 3, 2, 0, 1,
+                                                     3, 3, 1, 2, 2, 2, 2, 0,
+                                                     3, 1, 2, 0, 1, 0, 1, 1 };
             return DeBruijnBytePos[((U32)((val & -(S32)val) * 0x077CB531U)) >> 27];
 #       endif
         }
@@ -2294,8 +2388,14 @@ typedef void (*ZSTD_blockCompressor) (ZSTD_CCtx* ctx, const void* src, size_t sr
 static ZSTD_blockCompressor ZSTD_selectBlockCompressor(ZSTD_strategy strat, int extDict)
 {
     static const ZSTD_blockCompressor blockCompressor[2][8] = {
-        { ZSTD_compressBlock_fast, ZSTD_compressBlock_doubleFast, ZSTD_compressBlock_greedy, ZSTD_compressBlock_lazy, ZSTD_compressBlock_lazy2, ZSTD_compressBlock_btlazy2, ZSTD_compressBlock_btopt, ZSTD_compressBlock_btopt2 },
-        { ZSTD_compressBlock_fast_extDict, ZSTD_compressBlock_doubleFast_extDict, ZSTD_compressBlock_greedy_extDict, ZSTD_compressBlock_lazy_extDict,ZSTD_compressBlock_lazy2_extDict, ZSTD_compressBlock_btlazy2_extDict, ZSTD_compressBlock_btopt_extDict, ZSTD_compressBlock_btopt2_extDict }
+        { ZSTD_compressBlock_fast, ZSTD_compressBlock_doubleFast,
+          ZSTD_compressBlock_greedy, ZSTD_compressBlock_lazy,
+          ZSTD_compressBlock_lazy2, ZSTD_compressBlock_btlazy2,
+          ZSTD_compressBlock_btopt, ZSTD_compressBlock_btopt2 },
+        { ZSTD_compressBlock_fast_extDict, ZSTD_compressBlock_doubleFast_extDict,
+          ZSTD_compressBlock_greedy_extDict, ZSTD_compressBlock_lazy_extDict,
+          ZSTD_compressBlock_lazy2_extDict, ZSTD_compressBlock_btlazy2_extDict,
+          ZSTD_compressBlock_btopt_extDict, ZSTD_compressBlock_btopt2_extDict }
     };
 
     return blockCompressor[extDict][(U32)strat];
