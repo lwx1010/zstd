@@ -208,10 +208,35 @@ size_t ZSTD_CCtx_setParameter(ZSTD_CCtx* cctx, ZSTD_cParameter param, unsigned v
     case ZSTD_p_refDictContent :   /* to be done later */
             return ERROR(compressionParameter_unsupported);
 
-    case ZSTD_p_forceWindow : cctx->forceWindow = value>0; cctx->loadedDictEnd = 0; return 0;
-    case ZSTD_p_forceRawDict : cctx->forceRawDict = value>0; return 0;
+    case ZSTD_p_forceWindow :  /* Force back-references to remain < windowSize, even when referencing into Dictionary content (default:0) */
+            cctx->forceWindow = value>0;
+            cctx->loadedDictEnd = 0;
+            return 0;
+
+    case ZSTD_p_forceRawDict :  /* Force loading dictionary in "content-only" mode (no header analysis) (default:0) */
+            cctx->forceRawDict = value>0;
+            return 0;
+
     default: return ERROR(parameter_unknown);
     }
+}
+
+ZSTDLIB_API size_t ZSTD_CCtx_setPledgedSrcSize(ZSTD_CCtx* cctx, unsigned long long pledgedSrcSize)
+{
+    cctx->frameContentSize = pledgedSrcSize;
+    return 0;
+}
+
+ZSTDLIB_API size_t ZSTD_CCtx_loadDictionary(ZSTD_CCtx* cctx, const void* dict, size_t dictionary)
+{
+    (void)cctx; (void)dict; (void)dictionary; /* to be done later */
+    return ERROR(compressionParameter_unsupported);
+}
+
+ZSTDLIB_API size_t ZSTD_CCtx_refCDict(ZSTD_CCtx* cctx, const ZSTD_CDict* cdict)  /* Not ready yet ! */
+{
+    (void)cctx; (void)cdict;  /* to be done later */
+    return ERROR(compressionParameter_unsupported);
 }
 
 const seqStore_t* ZSTD_getSeqStore(const ZSTD_CCtx* ctx)   /* hidden interface */
