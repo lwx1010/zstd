@@ -1,0 +1,3 @@
+set solib-search-path ./obj/local/x86
+source E:/android/android-ndk-r10e/prebuilt/common/gdb/common.setup
+directory E:/android/android-ndk-r10e/platforms/android-18/arch-x86/usr/include E:/android/android-ndk-r10e/sources/cxx-stl/system jni/lib jni/lib/common jni/lib/compress jni/lib/decompress jni/lib/dictBuilder jni/lib/legacy
