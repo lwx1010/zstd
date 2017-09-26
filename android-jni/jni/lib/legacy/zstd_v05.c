@@ -1,10 +1,10 @@
-/**
+/*
  * Copyright (c) 2016-present, Yann Collet, Facebook, Inc.
  * All rights reserved.
  *
- * This source code is licensed under the BSD-style license found in the
- * LICENSE file in the root directory of this source tree. An additional grant
- * of patent rights can be found in the PATENTS file in the same directory.
+ * This source code is licensed under both the BSD-style license (found in the
+ * LICENSE file in the root directory of this source tree) and the GPLv2 (found
+ * in the COPYING file in the root directory of this source tree).
  */
 
 
@@ -326,13 +326,6 @@ size_t ZSTDv05_decompress_usingPreparedDCtx(
 *  Streaming functions (direct mode)
 ****************************************/
 size_t ZSTDv05_decompressBegin(ZSTDv05_DCtx* dctx);
-size_t ZSTDv05_decompressBegin_usingDict(ZSTDv05_DCtx* dctx, const void* dict, size_t dictSize);
-void   ZSTDv05_copyDCtx(ZSTDv05_DCtx* dctx, const ZSTDv05_DCtx* preparedDCtx);
-
-size_t ZSTDv05_getFrameParams(ZSTDv05_parameters* params, const void* src, size_t srcSize);
-
-size_t ZSTDv05_nextSrcSizeToDecompress(ZSTDv05_DCtx* dctx);
-size_t ZSTDv05_decompressContinue(ZSTDv05_DCtx* dctx, void* dst, size_t dstCapacity, const void* src, size_t srcSize);
 
 /*
   Streaming decompression, direct mode (bufferless)
@@ -2895,7 +2888,7 @@ static size_t ZSTDv05_decodeFrameHeader_Part2(ZSTDv05_DCtx* zc, const void* src,
     if (srcSize != zc->headerSize)
         return ERROR(srcSize_wrong);
     result = ZSTDv05_getFrameParams(&(zc->params), src, srcSize);
-    if ((MEM_32bits()) && (zc->params.windowLog > 25)) return ERROR(frameParameter_unsupportedBy32bits);
+    if ((MEM_32bits()) && (zc->params.windowLog > 25)) return ERROR(frameParameter_unsupported);
     return result;
 }
 
